@@ -109,12 +109,13 @@ class Predictor:
             os.remove(audio_path)
 
         return {
-            "segments": result["segments"],
-            "detected_language": LANGUAGES[result["language"]],
-            "transcription": transcription,
-            "translation": translation["text"] if translate else None,
+            "output": {
+                "segments": result["segments"],
+                "detected_language": LANGUAGES[result["language"]],
+                "transcription": transcription,
+                "translation": translation["text"] if translate else None
+            }
         }
-
 
 def write_vtt(transcript):
     result = ""
