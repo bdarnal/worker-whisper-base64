@@ -1,12 +1,9 @@
-"""
-This file contains the Predictor class, which is used to run predictions on the
-Whisper model. It is based on the Predictor class from the original Whisper
-repository, with some modifications to make it work with the RP platform.
-"""
-
 from concurrent.futures import ThreadPoolExecutor
 import torch
 import numpy as np
+import tempfile
+import base64
+import os
 
 from whisper.model import Whisper, ModelDimensions
 from whisper.tokenizer import LANGUAGES
@@ -22,9 +19,6 @@ class Predictor:
         self.models = {}
 
         def load_model(model_name):
-            '''
-            Load the model from the weights folder.
-            '''
             try:
                 with open(f"weights/{model_name}.pt", "rb") as model_file:
                     checkpoint = torch.load(model_file, map_location="cpu")
@@ -68,6 +62,14 @@ class Predictor:
         if torch.cuda.is_available():
             model = model.to("cuda")
 
+        if audio.startswith("http"):
+            audio_path = audio
+        else:
+            audio_data = base64.b64decode(audio)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_audio:
+                tmp_audio.write(audio_data)
+                audio_path = tmp_audio.name
+
         if temperature_increment_on_fallback is not None:
             temperature = tuple(
                 np.arange(temperature, 1.0 + 1e-6, temperature_increment_on_fallback)
@@ -89,7 +91,7 @@ class Predictor:
             "no_speech_threshold": no_speech_threshold,
         }
 
-        result = model.transcribe(str(audio), temperature=temperature, **args)
+        result = model.transcribe(str(audio_path), temperature=temperature, **args)
 
         if transcription == "plain text":
             transcription = result["text"]
@@ -100,8 +102,11 @@ class Predictor:
 
         if translate:
             translation = model.transcribe(
-                str(audio), task="translate", temperature=temperature, **args
+                str(audio_path), task="translate", temperature=temperature, **args
             )
+
+        if not audio.startswith("http"):
+            os.remove(audio_path)
 
         return {
             "segments": result["segments"],
@@ -112,26 +117,18 @@ class Predictor:
 
 
 def write_vtt(transcript):
-    '''
-    Write the transcript in VTT format.
-    '''
     result = ""
     for segment in transcript:
         result += f"{format_timestamp(segment['start'])} --> {format_timestamp(segment['end'])}\n"
-        result += f"{segment['text'].strip().replace('-->', '->')}\n"
-        result += "\n"
+        result += f"{segment['text'].strip().replace('-->', '->')}\n\n"
     return result
 
 
 def write_srt(transcript):
-    '''
-    Write the transcript in SRT format.
-    '''
     result = ""
     for i, segment in enumerate(transcript, start=1):
         result += f"{i}\n"
         result += f"{format_timestamp(segment['start'], always_include_hours=True, decimal_marker=',')} --> "
         result += f"{format_timestamp(segment['end'], always_include_hours=True, decimal_marker=',')}\n"
-        result += f"{segment['text'].strip().replace('-->', '->')}\n"
-        result += "\n"
+        result += f"{segment['text'].strip().replace('-->', '->')}\n\n"
     return result
